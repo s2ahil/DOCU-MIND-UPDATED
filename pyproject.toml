@@ -1,0 +1,34 @@
+[project]
+name = "rag"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Sahil Pradhan",email = "sahilpradhan411@gmail.com"}
+]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi (>=0.141.1,<0.142.0)",
+    "uvicorn (>=0.52.4,<0.53.0)",
+    "streamlit (>=1.62.0,<2.0.0)",
+    "langchain (>=1.3.16,<2.0.0)",
+    "faiss-cpu (>=1.15.0,<2.0.0)",
+    "langchain-core (>=1.6.0,<2.0.0)",
+    "langchain-google-genai (>=4.3.5,<5.0.0)",
+    "pypdf2 (>=3.0.1,<4.0.0)",
+    "google-ai-generativelanguage (>=0.12.0,<0.13.0)",
+    "langchain-community (>=0.4.2,<0.5.0)",
+    "pandas (>=3.0.5,<4.0.0)",
+    "langchain-huggingface (>=1.2.2,<2.0.0)",
+    "wikipedia (>=1.4.0,<2.0.0)",
+    "sentence-transformers (>=6.0.0,<7.0.0)",
+    "transformers (>=5.15.1,<6.0.0)",
+    "langchain-text-splitters (>=1.1.2,<2.0.0)"
+]
+
+[tool.poetry]
+package-mode = false
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
