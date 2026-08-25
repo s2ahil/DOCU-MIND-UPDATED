@@ -3,24 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from PyPDF2 import PdfReader
 from io import BytesIO
 import os
-import shutil
 from dotenv import load_dotenv
 from groq import Groq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import (
-    GoogleGenerativeAIEmbeddings,
-    ChatGoogleGenerativeAI
-)
-from langchain_core.prompts import PromptTemplate
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-# if not GOOGLE_API_KEY:
-#     raise ValueError("GOOGLE_API_KEY is not set")
 
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY is not set")
@@ -28,10 +20,10 @@ if not GROQ_API_KEY:
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY is not set")
 
-
 groq_client = Groq(
     api_key=GROQ_API_KEY
 )
+
 app = FastAPI()
 
 app.add_middleware(
@@ -42,7 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FAISS_INDEX_PATH = "faiss_index"
 EMBEDDING_MODEL = "gemini-embedding-001"
 LLM_MODEL = "openai/gpt-oss-120b"
 
@@ -52,34 +43,6 @@ embeddings = GoogleGenerativeAIEmbeddings(
     model=EMBEDDING_MODEL,
     google_api_key=GOOGLE_API_KEY
 )
-
-# model = ChatGoogleGenerativeAI(
-#     model=LLM_MODEL,
-#     temperature=0.3,
-#     google_api_key=GOOGLE_API_KEY
-# )
-
-# prompt = PromptTemplate(
-#     template="""
-# Answer the question as accurately as possible using ONLY
-# the information provided in the context.
-
-# If the answer is not available in the context, say:
-
-# "Answer is not available in the context."
-
-# Do not make up information.
-
-# Context:
-# {context}
-
-# Question:
-# {question}
-
-# Answer:
-# """,
-#     input_variables=["context", "question"]
-# )
 
 
 @app.get("/")
@@ -118,16 +81,9 @@ def get_text_chunks(text):
 def get_vector_store(text_chunks):
     global vector_store
 
-    if os.path.exists(FAISS_INDEX_PATH):
-        shutil.rmtree(FAISS_INDEX_PATH)
-
     vector_store = FAISS.from_texts(
         text_chunks,
         embedding=embeddings
-    )
-
-    vector_store.save_local(
-        FAISS_INDEX_PATH
     )
 
     return vector_store
@@ -205,19 +161,9 @@ async def answer_question(
 
     try:
         if vector_store is None:
-
-            if not os.path.exists(
-                FAISS_INDEX_PATH
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Please upload and process a PDF first."
-                )
-
-            vector_store = FAISS.load_local(
-                FAISS_INDEX_PATH,
-                embeddings,
-                allow_dangerous_deserialization=True
+            raise HTTPException(
+                status_code=400,
+                detail="Please upload and process a PDF first."
             )
 
         docs = vector_store.similarity_search(
@@ -234,18 +180,6 @@ async def answer_question(
             doc.page_content
             for doc in docs
         )
-
-
-        # final_prompt = prompt.format(
-        #     context=context,
-        #     question=user_question
-        # )
-
-        # response = model.invoke(
-        #     final_prompt
-        # )
-
-        # content = response.content
 
         prompt = f"""
 You are a PDF question-answering assistant.
@@ -285,20 +219,6 @@ Answer:
         )
 
         answer = completion.choices[0].message.content
-
-        # if isinstance(content, list):
-        #     answer = ""
-
-        #     for item in content:
-        #         if isinstance(item, dict):
-        #             answer += item.get(
-        #                 "text",
-        #                 ""
-        #             )
-        #         elif isinstance(item, str):
-        #             answer += item
-        # else:
-        #     answer = str(content)
 
         return {
             "answer": answer
