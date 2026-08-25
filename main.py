@@ -5,20 +5,33 @@ from io import BytesIO
 import os
 import shutil
 from dotenv import load_dotenv
-
+from groq import Groq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import (
+    GoogleGenerativeAIEmbeddings,
+    ChatGoogleGenerativeAI
+)
 from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# if not GOOGLE_API_KEY:
+#     raise ValueError("GOOGLE_API_KEY is not set")
+
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY is not set")
 
 if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY is not set in .env")
+    raise ValueError("GOOGLE_API_KEY is not set")
 
+
+groq_client = Groq(
+    api_key=GROQ_API_KEY
+)
 app = FastAPI()
 
 app.add_middleware(
@@ -30,20 +43,59 @@ app.add_middleware(
 )
 
 FAISS_INDEX_PATH = "faiss_index"
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-LLM_MODEL = "gemini-3.7-flash"
+EMBEDDING_MODEL = "gemini-embedding-001"
+LLM_MODEL = "openai/gpt-oss-120b"
+
+vector_store = None
+
+embeddings = GoogleGenerativeAIEmbeddings(
+    model=EMBEDDING_MODEL,
+    google_api_key=GOOGLE_API_KEY
+)
+
+# model = ChatGoogleGenerativeAI(
+#     model=LLM_MODEL,
+#     temperature=0.3,
+#     google_api_key=GOOGLE_API_KEY
+# )
+
+# prompt = PromptTemplate(
+#     template="""
+# Answer the question as accurately as possible using ONLY
+# the information provided in the context.
+
+# If the answer is not available in the context, say:
+
+# "Answer is not available in the context."
+
+# Do not make up information.
+
+# Context:
+# {context}
+
+# Question:
+# {question}
+
+# Answer:
+# """,
+#     input_variables=["context", "question"]
+# )
 
 
 @app.get("/")
 def read_root():
-    return {"message": "PDF Q&A API is running"}
+    return {
+        "message": "PDF Q&A API is running"
+    }
 
 
 def get_pdf_text(pdf_contents):
     text = ""
 
     for pdf in pdf_contents:
-        pdf_reader = PdfReader(BytesIO(pdf))
+        pdf_reader = PdfReader(
+            BytesIO(pdf)
+        )
 
         for page in pdf_reader.pages:
             page_text = page.extract_text()
@@ -56,17 +108,15 @@ def get_pdf_text(pdf_contents):
 
 def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=5000,
-        chunk_overlap=500
+        chunk_size=10000,
+        chunk_overlap=1000
     )
 
     return text_splitter.split_text(text)
 
 
 def get_vector_store(text_chunks):
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL
-    )
+    global vector_store
 
     if os.path.exists(FAISS_INDEX_PATH):
         shutil.rmtree(FAISS_INDEX_PATH)
@@ -76,46 +126,11 @@ def get_vector_store(text_chunks):
         embedding=embeddings
     )
 
-    vector_store.save_local(FAISS_INDEX_PATH)
+    vector_store.save_local(
+        FAISS_INDEX_PATH
+    )
 
     return vector_store
-
-
-def get_conversational_chain():
-    prompt_template = """
-You are a PDF question-answering assistant.
-
-Answer the question using ONLY the information
-provided in the context.
-
-If the answer is not present in the context,
-say exactly:
-
-"Answer is not available in the context."
-
-Do not make up information.
-
-Context:
-{context}
-
-Question:
-{question}
-
-Answer:
-"""
-
-    model = ChatGoogleGenerativeAI(
-        model=LLM_MODEL,
-        temperature=0.3,
-        google_api_key=GOOGLE_API_KEY
-    )
-
-    prompt = PromptTemplate(
-        template=prompt_template,
-        input_variables=["context", "question"]
-    )
-
-    return model, prompt
 
 
 @app.post("/process_pdf")
@@ -137,7 +152,9 @@ async def process_pdf(
                 detail="No PDF files were uploaded."
             )
 
-        raw_text = get_pdf_text(pdf_contents)
+        raw_text = get_pdf_text(
+            pdf_contents
+        )
 
         if not raw_text.strip():
             raise HTTPException(
@@ -145,7 +162,9 @@ async def process_pdf(
                 detail="Could not extract text from PDF."
             )
 
-        text_chunks = get_text_chunks(raw_text)
+        text_chunks = get_text_chunks(
+            raw_text
+        )
 
         if not text_chunks:
             raise HTTPException(
@@ -153,7 +172,9 @@ async def process_pdf(
                 detail="No text chunks were created."
             )
 
-        get_vector_store(text_chunks)
+        get_vector_store(
+            text_chunks
+        )
 
         return {
             "status": "success",
@@ -165,37 +186,43 @@ async def process_pdf(
         raise
 
     except Exception as e:
-        print("Error processing PDF:", e)
+        print(
+            "Error processing PDF:",
+            e
+        )
 
         raise HTTPException(
             status_code=500,
             detail=str(e)
         )
 
+
 @app.post("/answer_question")
 async def answer_question(
     user_question: str = Body(..., embed=True)
 ):
+    global vector_store
+
     try:
-        if not os.path.exists(FAISS_INDEX_PATH):
-            raise HTTPException(
-                status_code=400,
-                detail="Please upload and process a PDF first."
+        if vector_store is None:
+
+            if not os.path.exists(
+                FAISS_INDEX_PATH
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Please upload and process a PDF first."
+                )
+
+            vector_store = FAISS.load_local(
+                FAISS_INDEX_PATH,
+                embeddings,
+                allow_dangerous_deserialization=True
             )
 
-        embeddings = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_MODEL
-        )
-
-        new_db = FAISS.load_local(
-            FAISS_INDEX_PATH,
-            embeddings,
-            allow_dangerous_deserialization=True
-        )
-
-        docs = new_db.similarity_search(
+        docs = vector_store.similarity_search(
             user_question,
-            k=5
+            k=3
         )
 
         if not docs:
@@ -208,27 +235,70 @@ async def answer_question(
             for doc in docs
         )
 
-        model, prompt = get_conversational_chain()
 
-        final_prompt = prompt.format(
-            context=context,
-            question=user_question
+        # final_prompt = prompt.format(
+        #     context=context,
+        #     question=user_question
+        # )
+
+        # response = model.invoke(
+        #     final_prompt
+        # )
+
+        # content = response.content
+
+        prompt = f"""
+You are a PDF question-answering assistant.
+
+Answer the question using ONLY the information
+provided in the context.
+
+If the answer is not available in the context,
+say exactly:
+
+"Answer is not available in the context."
+
+Do not make up information.
+
+Context:
+{context}
+
+Question:
+{user_question}
+
+Answer:
+"""
+
+        completion = groq_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.3,
+            max_completion_tokens=2048,
+            top_p=1,
+            reasoning_effort="low",
+            stream=False
         )
 
-        response = model.invoke(final_prompt)
+        answer = completion.choices[0].message.content
 
-        content = response.content
+        # if isinstance(content, list):
+        #     answer = ""
 
-        if isinstance(content, list):
-            answer = ""
-
-            for item in content:
-                if isinstance(item, dict):
-                    answer += item.get("text", "")
-                elif isinstance(item, str):
-                    answer += item
-        else:
-            answer = str(content)
+        #     for item in content:
+        #         if isinstance(item, dict):
+        #             answer += item.get(
+        #                 "text",
+        #                 ""
+        #             )
+        #         elif isinstance(item, str):
+        #             answer += item
+        # else:
+        #     answer = str(content)
 
         return {
             "answer": answer
@@ -238,7 +308,10 @@ async def answer_question(
         raise
 
     except Exception as e:
-        print("Error answering question:", e)
+        print(
+            "Error answering question:",
+            e
+        )
 
         raise HTTPException(
             status_code=500,
@@ -249,8 +322,15 @@ async def answer_question(
 if __name__ == "__main__":
     import uvicorn
 
+    port = int(
+        os.environ.get(
+            "PORT",
+            8000
+        )
+    )
+
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000
+        port=port
     )
